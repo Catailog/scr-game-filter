@@ -89,3 +89,7 @@ Get-FileHash .\scr-game-filter.exe -Algorithm SHA256
 ```
 
 출력된 값이 Releases에 적힌 값과 같으면 같은 파일입니다. 이 파일은 깃허브가 이 저장소의 소스 코드로 직접 빌드해서 올린 것입니다.
+
+## 라이선스
+
+MIT 라이선스입니다. 자유롭게 사용, 수정, 배포할 수 있고 보증은 제공되지 않습니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 보세요.

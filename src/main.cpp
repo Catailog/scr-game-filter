@@ -46,7 +46,7 @@ bool g_loading = false;
 bool g_saveDirty = false;
 
 struct Settings {
-    unsigned fields = kRoomFilterAllFields;
+    unsigned fields = kRoomFilterDefaultFields;
     std::string defaultFilter;  // UTF-8
 };
 
@@ -77,13 +77,11 @@ std::wstring Utf8ToWide(const std::string& s) {
     return w;
 }
 
-// 에디트 컨트롤은 줄바꿈이 \r\n이어야 줄이 나뉘어 보인다.
-std::wstring NormalizeNewlinesForEdit(const std::wstring& text) {
+// 방목록 필터에는 줄바꿈이라는 개념이 없으므로 입력칸에 줄바꿈이 남지 않게 한다.
+std::wstring StripNewlines(const std::wstring& text) {
     std::wstring out;
     for (wchar_t ch : text) {
-        if (ch == L'\r') continue;
-        if (ch == L'\n') out += L'\r';
-        out += ch;
+        if (ch != L'\r' && ch != L'\n') out += ch;
     }
     return out;
 }
@@ -254,6 +252,30 @@ std::string ReadDefaultFilterFromEdit(HWND hwnd) {
     return WideToUtf8(text);
 }
 
+// 입력칸에 줄바꿈이 있으면 지우고 true를 돌려준다. 커서는 지운 글자 수만큼 당겨서
+// 원래 위치에 남긴다.
+bool RemoveNewlinesFromEdit(HWND hwnd) {
+    HWND edit = GetDlgItem(hwnd, kIdDefaultEdit);
+    int len = GetWindowTextLengthW(edit);
+    std::wstring text(static_cast<size_t>(len) + 1, L'\0');
+    GetWindowTextW(edit, text.data(), len + 1);
+    text.resize(static_cast<size_t>(len));
+    if (text.find_first_of(L"\r\n") == std::wstring::npos) return false;
+
+    DWORD selStart = 0;
+    DWORD selEnd = 0;
+    SendMessageW(edit, EM_GETSEL, reinterpret_cast<WPARAM>(&selStart),
+                 reinterpret_cast<LPARAM>(&selEnd));
+    DWORD removedBeforeCaret = 0;
+    for (DWORD i = 0; i < selStart && i < text.size(); ++i) {
+        if (text[i] == L'\r' || text[i] == L'\n') ++removedBeforeCaret;
+    }
+    SetWindowTextW(edit, StripNewlines(text).c_str());
+    DWORD caret = selStart - removedBeforeCaret;
+    SendMessageW(edit, EM_SETSEL, caret, caret);
+    return true;
+}
+
 // 변경이 연달아 들어오면 타이머를 계속 다시 걸어서, 마지막 변경 500ms 뒤에 한 번만 저장한다.
 void ScheduleSave(HWND hwnd) {
     g_saveDirty = true;
@@ -308,10 +330,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                        L"기본 필터 (검색창이 비어 있어도 항상 적용, 검색창 내용과 AND)", 0, 14, 142,
                        360, 18);
             AddControl(hwnd, L"EDIT", L"",
-                       ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL, 14, 164, 360,
+                       ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL, 14, 164, 360,
                        90, kIdDefaultEdit, WS_EX_CLIENTEDGE);
             AddControl(hwnd, L"STATIC",
-                       L"A,B : A 또는 B 포함\r\n-A : A 포함 방 제외\r\n\\, \\- \\\\ : 쉼표, 하이픈, 역슬래시 글자",
+                       L"A,B : A 또는 B 포함 (쉼표로만 구분, 공백은 글자)\r\n-A : A 포함 방 제외\r\n\\, \\- \\\\ : 쉼표, 하이픈, 역슬래시 글자",
                        0, 14, 264, 360, 54);
             AddControl(hwnd, L"STATIC",
                        L"※ 체크박스와 기본 필터를 바꾸면\r\n방목록 패널을 다시 열어야 반영됩니다.", 0, 14,
@@ -325,7 +347,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                (settings.fields & cb.bit) ? BST_CHECKED : BST_UNCHECKED);
             }
             SetWindowTextW(GetDlgItem(hwnd, kIdDefaultEdit),
-                           NormalizeNewlinesForEdit(Utf8ToWide(settings.defaultFilter)).c_str());
+                           StripNewlines(Utf8ToWide(settings.defaultFilter)).c_str());
             g_loading = false;
             g_roomProxy.SetFieldMask(settings.fields);
             g_roomProxy.SetDefaultFilter(settings.defaultFilter);
@@ -348,6 +370,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int code = HIWORD(wParam);
             if (id == kIdDefaultEdit && code == EN_CHANGE) {
                 if (g_loading) return 0;
+                // 붙여넣기로 줄바꿈이 들어오면 지운다. 텍스트를 다시 넣으면 이 알림이
+                // 한 번 더 오고, 적용과 저장은 그쪽에서 한다.
+                if (RemoveNewlinesFromEdit(hwnd)) return 0;
                 ApplyDefaultFilter(hwnd);
                 ScheduleSave(hwnd);
                 return 0;
@@ -430,6 +455,20 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
 
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0)) {
+        // 다중 줄 에디트 컨트롤은 Ctrl+A를 기본으로 처리하지 않는다. 복사, 붙여넣기,
+        // 잘라내기, 실행 취소는 컨트롤이 알아서 처리한다. 줄바꿈이 없는 입력칸이라
+        // Enter는 막는다.
+        if (msg.message == WM_KEYDOWN) {
+            HWND edit = GetDlgItem(hwnd, kIdDefaultEdit);
+            if (msg.hwnd == edit) {
+                bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                if (ctrl && msg.wParam == 'A') {
+                    SendMessageW(edit, EM_SETSEL, 0, -1);
+                    continue;
+                }
+                if (msg.wParam == VK_RETURN) continue;
+            }
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }

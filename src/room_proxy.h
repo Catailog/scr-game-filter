@@ -12,10 +12,12 @@ enum RoomFilterField : unsigned {
     kRoomFilterMap = 4,      // 맵 이름(mapName)
     kRoomFilterCreator = 8,  // 방장 이름(creatorName)
     kRoomFilterAllFields = 15,
+    // 설정 파일이 없을 때의 기본 선택. 게임 타입과 방장 이름은 꺼져 있다.
+    kRoomFilterDefaultFields = kRoomFilterTitle | kRoomFilterMap,
 };
 
 // 게임의 임베디드 브라우저(SceneProxy)가 패널(HTML/JS)을 요청할 때 거치는
-// 로컬 HTTP 프록시. GameSearchPanel.js의 검색 판정 부분만 쉼표/공백 OR,
+// 로컬 HTTP 프록시. GameSearchPanel.js의 검색 판정 부분만 쉼표 OR,
 // `-` 제외, `\` 이스케이프를 지원하는 코드로 치환하고, 나머지 트래픽은 그대로
 // 릴레이한다. 필터링과 화면 표시는 전부 게임 화면 안에서 끝난다.
 class RoomProxy {

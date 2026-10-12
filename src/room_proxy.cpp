@@ -41,17 +41,19 @@ constexpr const char* kPanelJsMarkerPath = "GameSearchPanel.js";
 // 있고, 그때는 JS_PATCH_TOKEN_NOT_FOUND 로그가 남는다.
 //
 // 검색어 문법:
-// - 쉼표 또는 공백으로 나눈 토큰 중 하나라도 맞으면 보인다(OR).
+// - 쉼표로 나눈 토큰 중 하나라도 맞으면 보인다(OR). 공백은 구분자가 아니라
+//   토큰 안의 글자이고, 토큰 앞뒤의 공백만 무시한다. 줄바꿈이라는 개념은 없다.
 // - `-`로 시작하는 토큰은 제외 조건이다. 맞는 방은 다른 조건과 무관하게 숨긴다.
 //   제외 토큰만 있으면 나머지 방을 전부 보여주고, 단독 `-`는 무시한다.
-// - 빈 토큰(쉼표 연달아 또는 맨 끝 쉼표)은 indexOf("")가 항상 맞으므로 전체
-//   보기가 된다.
-// - `\,` `\-` `\\`는 각각 쉼표, 하이픈, 역슬래시 글자 그대로다. `\-`는 토큰
-//   맨 앞에서도 제외 표시가 아닌 일반 글자다. 그 외 글자 앞의 역슬래시는
-//   그냥 역슬래시 글자다.
+// - 쉼표가 만든 빈 토큰(쉼표 연달아, 맨 앞, 맨 끝)은 indexOf("")가 항상
+//   맞으므로 전체 보기가 된다.
+// - 역슬래시는 이스케이프로만 쓴다. `\,` `\-` `\\`는 각각 쉼표, 하이픈,
+//   역슬래시 글자 그대로이고, `\-`는 토큰 맨 앞에서도 제외 표시가 아닌 일반
+//   글자다. 그 외 글자 앞의 역슬래시나 맨 끝의 역슬래시는 잘못된 이스케이프
+//   이므로 역슬래시와 뒤따르는 한 글자를 통째로 없는 것으로 친다.
 //
 // 구분은 정규식 split이 아니라 직접 훑어서 한다. 정규식으로는 이스케이프된
-// 쉼표를 구분자에서 뺄 수 없기 때문이다. 구분자 규칙은 `\s*,\s*|\s+`와 같다.
+// 쉼표를 구분자에서 뺄 수 없기 때문이다.
 // 아래 JS는 C++ 원시 문자열(R"JS(...)JS")이라 역슬래시가 C++ 이스케이프를
 // 한 번 더 거치지 않는다. 소스에 보이는 `"\\"`가 곧 역슬래시 한 글자짜리 JS
 // 문자열이다.
@@ -70,14 +72,16 @@ constexpr const char* kSearchFilterHead = R"JS(if(!function(){)JS";
 constexpr const char* kSearchFilterTail =
     R"JS(function m(w){return(F&1&&e.gameName.toLowerCase().indexOf(w)>-1)||(F&2&&e.gameType.toLowerCase().indexOf(w)>-1)||)JS"
     R"JS((F&4&&e.mapName.toLowerCase().indexOf(w)>-1)||(F&8&&e.creatorName.toLowerCase().indexOf(w)>-1);})JS"
-    R"JS(function ev(q){if(q==="")return true;var inc=[],exc=[],cur="",neg=false,st=true,i=0,n=q.length,c,d,j;)JS"
-    R"JS(function p(){if(neg){if(cur.length)exc.push(cur);}else inc.push(cur);cur="";neg=false;st=true;})JS"
+    R"JS(function ev(q){if(q==="")return true;var inc=[],exc=[],cur="",neg=false,st=true,ws=true,ac=false,i=0,n=q.length,c,d;)JS"
+    R"JS(function p(f){cur=cur.replace(/\s+$/,"");)JS"
+    R"JS(if(neg){if(cur.length)exc.push(cur);}else if(f||ac||cur.length)inc.push(cur);)JS"
+    R"JS(cur="";neg=false;st=true;ws=true;ac=f;})JS"
     R"JS(while(i<n){c=q.charAt(i);)JS"
-    R"JS(if(c=="\\"){d=q.charAt(i+1);if(d=="\\"||d=="-"||d==","){cur+=d;i+=2;}else{cur+=c;i++;}st=false;continue;})JS"
-    R"JS(if(c==","||/\s/.test(c)){j=i;while(j<n&&/\s/.test(q.charAt(j)))j++;)JS"
-    R"JS(if(q.charAt(j)==","){j++;while(j<n&&/\s/.test(q.charAt(j)))j++;}p();i=j;continue;})JS"
-    R"JS(if(c=="-"&&st){neg=true;st=false;i++;continue;}cur+=c;st=false;i++;})JS"
-    R"JS(p();)JS"
+    R"JS(if(c=="\\"){d=q.charAt(i+1);if(d=="\\"||d=="-"||d==","){cur+=d;st=false;ws=false;}i+=2;continue;})JS"
+    R"JS(if(c==","){p(true);i++;continue;})JS"
+    R"JS(if(ws&&/\s/.test(c)){i++;continue;})JS"
+    R"JS(if(c=="-"&&st){neg=true;st=false;i++;continue;}cur+=c;st=false;ws=false;i++;})JS"
+    R"JS(p(false);)JS"
     R"JS(for(i=0;i<exc.length;i++)if(m(exc[i]))return false;)JS"
     R"JS(if(inc.length==0)return true;)JS"
     R"JS(for(i=0;i<inc.length;i++)if(m(inc[i]))return true;)JS"
@@ -213,7 +217,7 @@ struct RoomProxy::Impl {
     SOCKET listenSocket = INVALID_SOCKET;
     std::thread acceptThread;
     bool running = false;
-    std::atomic<unsigned> fieldMask{kRoomFilterAllFields};
+    std::atomic<unsigned> fieldMask{kRoomFilterDefaultFields};
     std::mutex defaultFilterMutex;
     std::string defaultFilter;
 

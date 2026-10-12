@@ -370,9 +370,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int code = HIWORD(wParam);
             if (id == kIdDefaultEdit && code == EN_CHANGE) {
                 if (g_loading) return 0;
-                // 붙여넣기로 줄바꿈이 들어오면 지운다. 텍스트를 다시 넣으면 이 알림이
-                // 한 번 더 오고, 적용과 저장은 그쪽에서 한다.
-                if (RemoveNewlinesFromEdit(hwnd)) return 0;
+                // 붙여넣기로 줄바꿈이 들어오면 지운다. 다중 줄 에디트는 SetWindowText로
+                // 바꾼 글에는 변경 알림을 다시 보내지 않으므로, 아래 적용과 저장을
+                // 이어서 직접 한다.
+                RemoveNewlinesFromEdit(hwnd);
                 ApplyDefaultFilter(hwnd);
                 ScheduleSave(hwnd);
                 return 0;

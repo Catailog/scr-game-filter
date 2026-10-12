@@ -1,0 +1,23 @@
+.claude/
+
+# Build outputs
+/build/
+/out/
+.vs/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# MSVC artifacts
+*.obj
+*.ilk
+*.pdb
+*.exe
+
+# Runtime
+*.log
+/debug/
+scr-game-filter.json
+scr-game-filter.json.tmp
